@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Raport Sprzedaży</title>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #1f1f1f;
+      color: #f1f1f1;
+      margin: 0;
+      padding: 40px;
+    }
+
+    /* Updated styles for h1 and h2 */
+    h1 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 300; /* Lighter weight for delicacy */
+      letter-spacing: 0.8px; /* Slightly increased letter spacing */
+      margin-bottom: 8px;
+      color: #bbbbbb; /* A lighter, subtle color */
+      font-size: 2.2em; /* Adjust size as needed */
+    }
+
+    h2 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 300; /* Lighter weight */
+      letter-spacing: 0.6px;
+      margin-bottom: 8px;
+      color: #cccccc; /* Slightly darker than h1 but still subtle */
+      font-size: 1.8em;
+    }
+
+    h3 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      letter-spacing: 0.3px;
+      margin-bottom: 8px;
+    }
+
+    th {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+    }
+
+    .file-group {
+      margin-bottom: 20px;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    label.upload-label {
+      background: #2c2c2c;
+      color: #f1f1f1;
+      padding: 10px 18px;
+      border-radius: 5px;
+      cursor: pointer;
+      display: inline-block;
+      transition: background 0.3s, transform 0.2s;
+      border: 1px solid #444;
+      font-weight: 500;
+      margin-top: 5px;
+    }
+
+    label.upload-label:hover {
+      background: #3a3a3a;
+      transform: scale(1.03);
+    }
+
+    .custom-file-name {
+      margin-left: 10px;
+      color: #bbb;
+      font-style: italic;
+    }
+
+    .flex-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 40px;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 20px;
+      background-color: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    }
+
+    th, td {
+      border: 1px solid #333;
+      padding: 10px;
+      font-size: 14px;
+    }
+
+    th {
+      background-color: #333;
+      color: #f1f1f1;
+      cursor: default;
+      user-select: none;
+    }
+
+    td.center, th.center {
+      text-align: center;
+    }
+
+    tr:nth-child(even) {
+      background-color: rgba(255, 255, 255, 0.03);
+    }
+
+    #sprzedane {
+      font-size: 1.2em;
+      color: #a8dadc;
+    }
+
+    .action-button {
+      display: inline-block;
+      margin-top: 15px;
+    }
+
+    .sortable:hover {
+      text-decoration: underline;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Porównanie Stanów Magazynowych</h1>
+
+  <div class="file-group">
+    <label class="upload-label" for="dikiFile">Wybierz plik DIKI (.txt)</label>
+    <span id="dikiFileName" class="custom-file-name">Brak pliku</span>
+    <input type="file" id="dikiFile" onchange="showFileName(this, 'dikiFileName')">
+  </div>
+
+  <div class="file-group">
+    <label class="upload-label" for="xlsFile">Wybierz plik ATENEUM (.xlsx)</label>
+    <span id="xlsFileName" class="custom-file-name">Brak pliku</span>
+    <input type="file" id="xlsFile" onchange="showFileName(this, 'xlsFileName')">
+  </div>
+
+  <div class="action-button">
+    <label class="upload-label" onclick="porownaj()">Porównaj dane</label>
+  </div>
+
+  <div id="raport"></div>
+
+<script>
+  let dikiData = new Map();
+  let aktualneData = new Map();
+  let raportRows = [];
+  let currentSort = { key: '', asc: true };
+
+  function showFileName(input, labelId) {
+    const fileName = input.files.length ? input.files[0].name : "Brak pliku";
+    document.getElementById(labelId).textContent = fileName;
+  }
+
+  function parseDIKI(text) {
+    const lines = text.split('\n');
+    for (let line of lines) {
+      const match = line.match(/\|\s*\d+\|T\s*\|[^|]+\|\s*(\d{6,13})\s*\|\s*([^|]{1,40})\s*\|\s*(\d+)/);
+      if (match) {
+        const fullEAN = match[1].trim();
+        const name = match[2].trim();
+        const stock = parseInt(match[3]);
+        dikiData.set(fullEAN, { name, stock });
+      }
+    }
+  }
+
+  function parseXLSX(arrayBuffer) {
+    const wb = XLSX.read(arrayBuffer, { type: "array" });
+    const sheet = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+    const headers = sheet[0].map(h => h?.toString().toLowerCase().trim());
+
+    const eanIndex = headers.findIndex(h => h === "symbol");
+    const stanIndex = headers.findIndex(h => h === "stan ogólny");
+
+    if (eanIndex === -1 || stanIndex === -1) {
+      alert("Nie znaleziono kolumn 'symbol' lub 'stan ogólny' w pliku Excel.");
+      return;
+    }
+
+    for (let i = 1; i < sheet.length; i++) {
+      const row = sheet[i];
+      const ean = String(row[eanIndex]).trim();
+      const stock = parseInt(row[stanIndex]);
+      if (!ean || isNaN(stock)) continue;
+      aktualneData.set(ean, stock);
+      aktualneData.set(ean.slice(-6), stock);
+    }
+  }
+
+  function porownaj() {
+    const dikiFile = document.getElementById("dikiFile").files[0];
+    const xlsFile = document.getElementById("xlsFile").files[0];
+
+    if (!dikiFile || !xlsFile) {
+      alert("Wczytaj oba pliki!");
+      return;
+    }
+
+    const readerDiki = new FileReader();
+    const readerXLS = new FileReader();
+
+    readerDiki.onload = function(e) {
+      parseDIKI(e.target.result);
+      if (readerXLS.result) buildRaportRows();
+    };
+    readerXLS.onload = function(e) {
+      parseXLSX(e.target.result);
+      if (readerDiki.result) buildRaportRows();
+    };
+
+    readerDiki.readAsText(dikiFile, "UTF-8");
+    readerXLS.readAsArrayBuffer(xlsFile);
+  }
+
+  function buildRaportRows() {
+    raportRows = [];
+    let pokazane = new Set();
+
+    for (let [ean, { name, stock: dikiStock }] of dikiData.entries()) {
+      if (pokazane.has(ean)) continue;
+
+      const stanAktualny = aktualneData.get(ean) ?? aktualneData.get(ean.slice(-6)) ?? 0;
+      const sprzedano = dikiStock - stanAktualny;
+
+      raportRows.push({
+        ean,
+        name,
+        dikiStock,
+        stanAktualny,
+        sprzedano
+      });
+
+      pokazane.add(ean);
+    }
+
+    renderTable();
+  }
+
+  function renderTable() {
+    let totalSold = raportRows.reduce((sum, r) => sum + r.sprzedano, 0);
+
+    let html = "<div class='flex-header'><h2>Raport Stanów Magazynowych</h2><h3 id='sprzedane'></h3></div><table>";
+    html += `<tr>
+      <th class='center'>Lp</th>
+      <th class='center sortable' onclick="sortBy('ean')">EAN</th>
+      <th class='sortable' onclick="sortBy('name')">Nazwa</th>
+      <th class='center sortable' onclick="sortBy('dikiStock')">Stan Diki</th>
+      <th class='center sortable' onclick="sortBy('stanAktualny')">Stan ATENEUM</th>
+      <th class='center sortable' onclick="sortBy('sprzedano')">Sprzedano</th>
+    </tr>`;
+
+    let lp = 1;
+    for (let row of raportRows) {
+      html += `<tr>
+        <td class='center'>${lp++}</td>
+        <td class='center'>${row.ean}</td>
+        <td>${row.name}</td>
+        <td class='center'>${row.dikiStock}</td>
+        <td class='center'>${row.stanAktualny}</td>
+        <td class='center'>${row.sprzedano}</td>
+      </tr>`;
+    }
+
+    html += "</table>";
+    document.getElementById("raport").innerHTML = html;
+    document.getElementById("sprzedane").innerText = `Łącznie sprzedano: ${totalSold} szt.`;
+  }
+
+  function sortBy(key) {
+    if (currentSort.key === key) {
+      currentSort.asc = !currentSort.asc;
+    } else {
+      currentSort.key = key;
+      currentSort.asc = true;
+    }
+
+    raportRows.sort((a, b) => {
+      const aVal = typeof a[key] === 'string' ? a[key].toLowerCase() : a[key];
+      const bVal = typeof b[key] === 'string' ? b[key].toLowerCase() : b[key];
+      if (aVal < bVal) return currentSort.asc ? -1 : 1;
+      if (aVal > bVal) return currentSort.asc ? 1 : -1;
+      return 0;
+    });
+
+    renderTable();
+  }
+</script>
+
+</body>
+</html>
