@@ -1,0 +1,2 @@
+# porownanie
+Porownanie stanów magazynowych.
